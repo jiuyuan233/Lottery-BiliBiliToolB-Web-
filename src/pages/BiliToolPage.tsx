@@ -271,6 +271,25 @@ export default function BiliToolPage() {
  在新窗口打开
  </a>
  </div>
+ <div className="glass-card p-4 border-lottery-pink/20">
+ <div className="flex items-center gap-3 mb-2">
+ <div className="w-8 h-8 rounded-lg bg-lottery-pink/20 flex items-center justify-center">
+ <CheckCircle2 className="w-4 h-4 text-lottery-pink"/>
+ </div>
+ <span className="text-sm text-gray-300">默认登录信息</span>
+ </div>
+ <div className="grid grid-cols-2 gap-4 text-sm">
+ <div>
+ <span className="text-gray-500">用户名：</span>
+ <code className="text-lottery-pink font-mono">admin</code>
+ </div>
+ <div>
+ <span className="text-gray-500">密码：</span>
+ <code className="text-lottery-pink font-mono">BiliTool@2233</code>
+ </div>
+ </div>
+ <p className="text-xs text-gray-500 mt-2">登录后请及时修改默认密码</p>
+ </div>
  <div className="glass-card p-4">
  <iframe src={biliToolUrl} className="w-full h-[700px] rounded-lg border-0 bg-white" title="BiliTool Web"/>
  </div>

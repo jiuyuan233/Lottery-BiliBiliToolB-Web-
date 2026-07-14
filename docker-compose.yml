@@ -10,4 +10,7 @@ services:
       - CONFIG_DIR=/data/config
       - HOST_CONFIG_DIR=${PWD}/config
       - TZ=Asia/Shanghai
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
+      - FEISHU_OPEN_ID=${FEISHU_OPEN_ID:-}
     restart: unless-stopped

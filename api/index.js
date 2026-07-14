@@ -888,6 +888,79 @@ app.get('/api/bili-tool/info', (req, res) => {
   });
 });
 
+const FEISHU_APP_ID = process.env.FEISHU_APP_ID || '';
+const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET || '';
+const FEISHU_OPEN_ID = process.env.FEISHU_OPEN_ID || '';
+
+let feishuAccessToken = '';
+let feishuTokenExpireAt = 0;
+
+async function getFeishuToken() {
+  const now = Date.now();
+  if (feishuAccessToken && now < feishuTokenExpireAt - 60000) {
+    return feishuAccessToken;
+  }
+  const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET })
+  });
+  const data = await response.json();
+  if (data.code === 0) {
+    feishuAccessToken = data.tenant_access_token;
+    feishuTokenExpireAt = now + data.expire * 1000;
+    return feishuAccessToken;
+  }
+  throw new Error(data.msg || '获取飞书token失败');
+}
+
+async function sendFeishuMessage(text) {
+  if (!FEISHU_APP_ID || !FEISHU_APP_SECRET || !FEISHU_OPEN_ID) {
+    throw new Error('飞书配置不完整');
+  }
+  const token = await getFeishuToken();
+  const response = await fetch('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      receive_id: FEISHU_OPEN_ID,
+      msg_type: 'text',
+      content: JSON.stringify({ text })
+    })
+  });
+  const data = await response.json();
+  if (data.code !== 0) {
+    throw new Error(data.msg || '发送飞书消息失败');
+  }
+  return data;
+}
+
+app.post('/api/notify/feishu', async (req, res) => {
+  try {
+    let text = req.body.text || req.body.content?.text || '';
+    if (req.body.msg_type && req.body.content) {
+      const content = typeof req.body.content === 'string' ? JSON.parse(req.body.content) : req.body.content;
+      text = content.text || '';
+    }
+    if (!text) {
+      text = '新消息通知';
+    }
+    await sendFeishuMessage(text);
+    res.json({ code: 0, msg: 'success' });
+  } catch (err) {
+    res.status(500).json({ code: -1, msg: err.message });
+  }
+});
+
+app.get('/api/notify/feishu/status', (req, res) => {
+  res.json({
+    configured: !!(FEISHU_APP_ID && FEISHU_APP_SECRET && FEISHU_OPEN_ID)
+  });
+});
+
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
   if (fs.existsSync(indexPath)) {
