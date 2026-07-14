@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import qrcode from 'qrcode';
+import * as lark from '@larksuiteoapi/node-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -892,50 +893,41 @@ const FEISHU_APP_ID = process.env.FEISHU_APP_ID || '';
 const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET || '';
 const FEISHU_OPEN_ID = process.env.FEISHU_OPEN_ID || '';
 
-let feishuAccessToken = '';
-let feishuTokenExpireAt = 0;
+let feishuClient = null;
+let feishuWsClient = null;
 
-async function getFeishuToken() {
-  const now = Date.now();
-  if (feishuAccessToken && now < feishuTokenExpireAt - 60000) {
-    return feishuAccessToken;
-  }
-  const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET })
-  });
-  const data = await response.json();
-  if (data.code === 0) {
-    feishuAccessToken = data.tenant_access_token;
-    feishuTokenExpireAt = now + data.expire * 1000;
-    return feishuAccessToken;
-  }
-  throw new Error(data.msg || '获取飞书token失败');
-}
+const CONTAINER_LABELS = {
+  start: '抽奖任务',
+  check: '检查任务',
+  clear: '清理任务',
+  account: '账号管理',
+  login: '扫码登录',
+};
 
 async function sendFeishuMessage(text) {
   if (!FEISHU_APP_ID || !FEISHU_APP_SECRET || !FEISHU_OPEN_ID) {
     throw new Error('飞书配置不完整');
   }
-  const token = await getFeishuToken();
-  const response = await fetch('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
+  if (!feishuClient) {
+    feishuClient = new lark.Client({
+      appId: FEISHU_APP_ID,
+      appSecret: FEISHU_APP_SECRET,
+      appType: lark.AppType.SelfBuild,
+      domain: lark.Domain.Feishu,
+    });
+  }
+  const res = await feishuClient.im.message.create({
+    params: { receive_id_type: 'open_id' },
+    data: {
       receive_id: FEISHU_OPEN_ID,
       msg_type: 'text',
-      content: JSON.stringify({ text })
-    })
+      content: JSON.stringify({ text }),
+    },
   });
-  const data = await response.json();
-  if (data.code !== 0) {
-    throw new Error(data.msg || '发送飞书消息失败');
+  if (res.code !== 0) {
+    throw new Error(res.msg || '发送飞书消息失败');
   }
-  return data;
+  return res;
 }
 
 app.post('/api/notify/feishu', async (req, res) => {
@@ -960,6 +952,346 @@ app.get('/api/notify/feishu/status', (req, res) => {
     configured: !!(FEISHU_APP_ID && FEISHU_APP_SECRET && FEISHU_OPEN_ID)
   });
 });
+
+async function runContainerAction(name, action) {
+  const containerName = CONTAINERS[name];
+  if (!containerName) {
+    return { success: false, msg: `未知任务：${name}` };
+  }
+  try {
+    const status = await getContainerStatus(containerName);
+    switch (action) {
+      case 'start': {
+        if (status.running) {
+          return { success: true, msg: `${CONTAINER_LABELS[name]} 已在运行中` };
+        }
+        if (status.exists) {
+          await execCmd(`docker rm -f ${containerName} 2>/dev/null || true`);
+        }
+        await execCmd(`docker run -d \
+          -v ${HOST_CONFIG_DIR}/env.js:/lottery/env.js \
+          -v ${HOST_CONFIG_DIR}/my_config.js:/lottery/my_config.js \
+          --network host \
+          --name ${containerName} \
+          ${IMAGE_NAME} \
+          ${name}`);
+        return { success: true, msg: `${CONTAINER_LABELS[name]} 已启动` };
+      }
+      case 'restart': {
+        if (status.exists) {
+          await execCmd(`docker rm -f ${containerName} 2>/dev/null || true`);
+        }
+        await execCmd(`docker run -d \
+          -v ${HOST_CONFIG_DIR}/env.js:/lottery/env.js \
+          -v ${HOST_CONFIG_DIR}/my_config.js:/lottery/my_config.js \
+          --network host \
+          --name ${containerName} \
+          ${IMAGE_NAME} \
+          ${name}`);
+        return { success: true, msg: `${CONTAINER_LABELS[name]} 已重启` };
+      }
+      case 'stop': {
+        if (!status.exists) {
+          return { success: true, msg: `${CONTAINER_LABELS[name]} 未在运行` };
+        }
+        await execCmd(`docker stop ${containerName} 2>/dev/null || true`);
+        await execCmd(`docker rm -f ${containerName} 2>/dev/null || true`);
+        return { success: true, msg: `${CONTAINER_LABELS[name]} 已停止` };
+      }
+      case 'status': {
+        if (!status.exists) {
+          return { success: true, msg: `${CONTAINER_LABELS[name]}：未运行` };
+        }
+        return { success: true, msg: `${CONTAINER_LABELS[name]}：${status.status}${status.running ? '（运行中）' : ''}` };
+      }
+      default:
+        return { success: false, msg: `未知操作：${action}` };
+    }
+  } catch (err) {
+    return { success: false, msg: `操作失败：${err.message}` };
+  }
+}
+
+async function sendFeishuReply(messageId, text) {
+  if (!feishuClient) {
+    throw new Error('飞书客户端未初始化');
+  }
+  const res = await feishuClient.im.message.reply({
+    path: { message_id: messageId },
+    data: {
+      msg_type: 'text',
+      content: JSON.stringify({ text }),
+    },
+  });
+  if (res.code !== 0) {
+    console.error('[Feishu] 回复消息失败:', res.code, res.msg);
+  }
+  return res;
+}
+
+function initFeishuLongConnection() {
+  if (!FEISHU_APP_ID || !FEISHU_APP_SECRET) {
+    console.log('[Feishu] App ID/Secret 未配置，跳过长连接初始化');
+    return;
+  }
+
+  if (!feishuClient) {
+    feishuClient = new lark.Client({
+      appId: FEISHU_APP_ID,
+      appSecret: FEISHU_APP_SECRET,
+      appType: lark.AppType.SelfBuild,
+      domain: lark.Domain.Feishu,
+      loggerLevel: lark.LoggerLevel.info,
+    });
+  }
+
+  const eventDispatcher = new lark.EventDispatcher({}).register({
+    'im.message.receive_v1': async (data) => {
+      try {
+        const msg = data.message;
+        const msgType = msg.message_type;
+        if (msgType !== 'text') {
+          await sendFeishuReply(msg.message_id, '⚠️ 仅支持文本消息指令\n\n发送"帮助"查看可用指令');
+          return;
+        }
+        let content = '';
+        try {
+          content = JSON.parse(msg.content).text || '';
+        } catch (e) {
+          content = '';
+        }
+        content = content.trim().replace(/@\S+\s?/g, '').trim();
+        const lowerContent = content.toLowerCase();
+
+        if (content === '状态' || lowerContent === 'status' || content === '状态查询') {
+          const dockerStatus = await execCmd('docker ps -a --format "{{.Names}}|{{.Status}}" 2>/dev/null');
+          const lines = dockerStatus.stdout.trim().split('\n').filter(l => l);
+          let reply = '📊 服务状态\n\n';
+          for (const line of lines) {
+            const idx = line.indexOf('|');
+            const name = line.slice(0, idx);
+            const status = line.slice(idx + 1);
+            const icon = status.startsWith('Up') ? '✅' : '❌';
+            reply += `${icon} ${name}: ${status}\n`;
+          }
+          if (!lines.length) reply += '暂无容器';
+          await sendFeishuReply(msg.message_id, reply);
+        } else if (
+          lowerContent === 'start' || lowerContent === '启动' ||
+          lowerContent === 'start start' || content === '启动抽奖' ||
+          content === '开始抽奖'
+        ) {
+          const result = await runContainerAction('start', 'start');
+          await sendFeishuReply(msg.message_id,
+            `🎰 ${result.success ? '✅' : '❌'} ${result.msg}`);
+        } else if (
+          lowerContent === 'check' || lowerContent === '检查' ||
+          lowerContent === 'start check' || content === '启动检查'
+        ) {
+          const result = await runContainerAction('check', 'start');
+          await sendFeishuReply(msg.message_id,
+            `🔍 ${result.success ? '✅' : '❌'} ${result.msg}`);
+        } else if (
+          lowerContent === 'clear' || lowerContent === '清理' ||
+          lowerContent === 'start clear' || content === '启动清理'
+        ) {
+          const result = await runContainerAction('clear', 'start');
+          await sendFeishuReply(msg.message_id,
+            `🧹 ${result.success ? '✅' : '❌'} ${result.msg}`);
+        } else if (
+          lowerContent === 'stop' || lowerContent === '停止' ||
+          lowerContent === 'stop start' || content === '停止抽奖'
+        ) {
+          const result = await runContainerAction('start', 'stop');
+          await sendFeishuReply(msg.message_id,
+            `🛑 ${result.success ? '✅' : '❌'} ${result.msg}`);
+        } else if (
+          lowerContent === 'restart' || lowerContent === '重启' ||
+          lowerContent === 'restart start' || content === '重启抽奖'
+        ) {
+          const result = await runContainerAction('start', 'restart');
+          await sendFeishuReply(msg.message_id,
+            `🔄 ${result.success ? '✅' : '❌'} ${result.msg}`);
+        } else if (lowerContent.startsWith('启动 ') || lowerContent.startsWith('start ')) {
+          const taskName = content.slice(content.indexOf(' ') + 1).trim().toLowerCase();
+          const nameMap = { '抽奖': 'start', 'start': 'start', '检查': 'check', 'check': 'check', '清理': 'clear', 'clear': 'clear', '账号': 'account', 'account': 'account', '登录': 'login', 'login': 'login' };
+          const name = nameMap[taskName];
+          if (!name) {
+            await sendFeishuReply(msg.message_id,
+              `❌ 未知任务：${taskName}\n\n支持的任务：抽奖、检查、清理、账号、登录`);
+            return;
+          }
+          const result = await runContainerAction(name, 'start');
+          await sendFeishuReply(msg.message_id,
+            `🚀 ${result.success ? '✅' : '❌'} ${result.msg}`);
+        } else if (lowerContent.startsWith('停止 ') || lowerContent.startsWith('stop ')) {
+          const taskName = content.slice(content.indexOf(' ') + 1).trim().toLowerCase();
+          const nameMap = { '抽奖': 'start', 'start': 'start', '检查': 'check', 'check': 'check', '清理': 'clear', 'clear': 'clear', '账号': 'account', 'account': 'account', '登录': 'login', 'login': 'login' };
+          const name = nameMap[taskName];
+          if (!name) {
+            await sendFeishuReply(msg.message_id,
+              `❌ 未知任务：${taskName}\n\n支持的任务：抽奖、检查、清理、账号、登录`);
+            return;
+          }
+          const result = await runContainerAction(name, 'stop');
+          await sendFeishuReply(msg.message_id,
+            `🛑 ${result.success ? '✅' : '❌'} ${result.msg}`);
+        } else if (lowerContent.startsWith('重启 ') || lowerContent.startsWith('restart ')) {
+          const taskName = content.slice(content.indexOf(' ') + 1).trim().toLowerCase();
+          const nameMap = { '抽奖': 'start', 'start': 'start', '检查': 'check', 'check': 'check', '清理': 'clear', 'clear': 'clear', '账号': 'account', 'account': 'account', '登录': 'login', 'login': 'login' };
+          const name = nameMap[taskName];
+          if (!name) {
+            await sendFeishuReply(msg.message_id,
+              `❌ 未知任务：${taskName}\n\n支持的任务：抽奖、检查、清理、账号、登录`);
+            return;
+          }
+          const result = await runContainerAction(name, 'restart');
+          await sendFeishuReply(msg.message_id,
+            `🔄 ${result.success ? '✅' : '❌'} ${result.msg}`);
+        } else if (content === '帮助' || lowerContent === 'help' || content === '?') {
+          await sendFeishuReply(msg.message_id,
+            '🤖 飞书机器人指令\n\n' +
+            '📊 状态查询\n' +
+            '  状态 - 查看所有容器运行状态\n\n' +
+            '🎮 任务控制\n' +
+            '  启动抽奖 / start - 启动抽奖任务\n' +
+            '  启动检查 / check - 启动检查任务\n' +
+            '  启动清理 / clear - 启动清理任务\n' +
+            '  停止抽奖 / stop - 停止抽奖任务\n' +
+            '  重启抽奖 / restart - 重启抽奖任务\n' +
+            '  启动 <任务名> - 启动指定任务\n' +
+            '  停止 <任务名> - 停止指定任务\n' +
+            '  重启 <任务名> - 重启指定任务\n' +
+            '  （任务名：抽奖/检查/清理/账号/登录）\n\n' +
+            '💡 中奖通知会自动推送到此会话');
+        } else if (content) {
+          await sendFeishuReply(msg.message_id,
+            `收到消息：${content}\n\n发送"帮助"查看可用指令`);
+        }
+      } catch (err) {
+        console.error('[Feishu] 处理消息事件失败:', err.message);
+      }
+    },
+  });
+
+  feishuWsClient = new lark.WSClient({
+    appId: FEISHU_APP_ID,
+    appSecret: FEISHU_APP_SECRET,
+    loggerLevel: lark.LoggerLevel.info,
+    domain: lark.Domain.Feishu,
+  });
+
+  feishuWsClient.start({
+    eventDispatcher,
+  }).then(() => {
+    console.log('[Feishu] 长连接已启动');
+  }).catch((err) => {
+    console.error('[Feishu] 长连接启动失败:', err.message);
+  });
+}
+
+initFeishuLongConnection();
+
+const containerMonitorState = {
+  check: { wasRunning: false, notified: false },
+  start: { wasRunning: false, notified: false },
+  clear: { wasRunning: false, notified: false },
+};
+
+async function checkForWinInLogs(containerName) {
+  try {
+    const result = await execCmd(`docker logs ${containerName} 2>&1 | grep -iE "中奖|恭喜|中了|winner|winning|已中奖" | tail -5`);
+    return result.stdout && result.stdout.trim().length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function getTaskSummary(containerName) {
+  try {
+    const result = await execCmd(`docker logs ${containerName} 2>&1 | tail -30`);
+    const logs = result.stdout || '';
+    let total = '';
+    const match = logs.match(/共.*?[抽奖动态|动态].*?(\d+)/i) || logs.match(/参与.*?(\d+).*?抽奖/i) || logs.match(/总.*?(\d+).*?个/i);
+    if (match) total = match[1];
+    return { total, raw: logs };
+  } catch (e) {
+    return { total: '', raw: '' };
+  }
+}
+
+async function runContainerMonitor() {
+  if (!FEISHU_APP_ID || !FEISHU_APP_SECRET || !FEISHU_OPEN_ID) return;
+
+  const monitorTargets = [
+    { key: 'check', label: '检查任务', emoji: '🔍' },
+    { key: 'clear', label: '清理任务', emoji: '🧹' },
+  ];
+
+  for (const target of monitorTargets) {
+    const containerName = CONTAINERS[target.key];
+    if (!containerName) continue;
+    try {
+      const status = await getContainerStatus(containerName);
+      const state = containerMonitorState[target.key];
+
+      if (status.running) {
+        if (!state.wasRunning) {
+          state.wasRunning = true;
+          state.notified = false;
+          console.log(`[Monitor] ${target.label} 开始运行`);
+        }
+      } else {
+        if (state.wasRunning && !state.notified) {
+          state.wasRunning = false;
+          state.notified = true;
+          console.log(`[Monitor] ${target.label} 已结束，检查结果...`);
+
+          const hasWon = await checkForWinInLogs(containerName);
+          const summary = await getTaskSummary(containerName);
+
+          let title, content;
+          if (hasWon) {
+            title = `${target.emoji} ${target.label}完成 - 🎉 恭喜中奖！`;
+            content = `${target.label}已运行完毕，检测到中奖信息！\n\n请查看详细日志确认中奖详情。`;
+          } else {
+            title = `${target.emoji} ${target.label}完成 - 未中奖`;
+            content = `${target.label}已运行完毕，本次未检测到中奖信息。\n继续加油，下次一定！💪`;
+          }
+
+          if (summary.total) {
+            content += `\n\n📊 处理数量：${summary.total}`;
+          }
+
+          const exitInfo = status.exitCode !== undefined ? `\n📝 退出码：${status.exitCode}` : '';
+          content += exitInfo;
+
+          try {
+            await sendFeishuMessage(title + '\n\n' + content);
+            console.log(`[Monitor] ${target.label}完成通知已发送`);
+          } catch (err) {
+            console.error('[Monitor] 发送通知失败:', err.message);
+          }
+        } else if (!status.exists) {
+          state.wasRunning = false;
+        }
+      }
+    } catch (e) {
+      console.error(`[Monitor] ${target.key} 监控异常:`, e.message);
+    }
+  }
+}
+
+let containerMonitorTimer = null;
+function startContainerMonitor() {
+  if (containerMonitorTimer) clearInterval(containerMonitorTimer);
+  if (FEISHU_APP_ID && FEISHU_APP_SECRET && FEISHU_OPEN_ID) {
+    containerMonitorTimer = setInterval(runContainerMonitor, 15 * 1000);
+    console.log('[Monitor] 容器监控已启动（15秒间隔）');
+  }
+}
+
+startContainerMonitor();
 
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '..', 'dist', 'index.html');

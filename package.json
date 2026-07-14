@@ -19,7 +19,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.25.1",
-    "zustand": "^4.5.4"
+    "zustand": "^4.5.4",
+    "@larksuiteoapi/node-sdk": "^1.70.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
