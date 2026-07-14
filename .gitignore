@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+.trae/
+*.bak
+*.tmp
+
+config/*
+!config/*.example.js
+!config/bili-tool/
+config/bili-tool/*
+!config/bili-tool/*.example

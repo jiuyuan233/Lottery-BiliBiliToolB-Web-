@@ -1,0 +1,13 @@
+services:
+  lottery-web:
+    build: .
+    ports:
+      - "9080:3001"
+    volumes:
+      - ./config:/data/config
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - CONFIG_DIR=/data/config
+      - HOST_CONFIG_DIR=${PWD}/config
+      - TZ=Asia/Shanghai
+    restart: unless-stopped

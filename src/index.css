@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #ec4899 #1a1a2e;
+  }
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  *::-webkit-scrollbar-track {
+    background: #1a1a2e;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: linear-gradient(to bottom, #ec4899, #f59e0b);
+    border-radius: 3px;
+  }
+  body {
+    @apply bg-lottery-dark text-gray-200 font-body antialiased;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-lottery-card/60 backdrop-blur-xl border border-lottery-border rounded-2xl;
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-lottery-pink via-lottery-rose to-lottery-gold bg-clip-text text-transparent;
+  }
+  .gradient-text-gold {
+    @apply bg-gradient-to-r from-lottery-gold to-lottery-amber bg-clip-text text-transparent;
+  }
+  .glow-border {
+    @apply relative;
+  }
+  .glow-border::before {
+    content: '';
+    @apply absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300;
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.5), rgba(245, 158, 11, 0.5));
+    z-index: -1;
+    filter: blur(12px);
+  }
+  .glow-border:hover::before {
+    @apply opacity-100;
+  }
+  .noise-bg {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  }
+  .grid-bg {
+    background-image: 
+      linear-gradient(rgba(236, 72, 153, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(236, 72, 153, 0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+  }
+  .code-block {
+    @apply bg-black/40 rounded-lg p-4 font-mono text-sm text-gray-300 overflow-x-auto border border-lottery-border;
+  }
+  .toggle-switch {
+    @apply relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-300 cursor-pointer;
+  }
+  .toggle-switch.active {
+    @apply bg-gradient-to-r from-lottery-pink to-lottery-rose;
+  }
+  .toggle-switch:not(.active) {
+    @apply bg-lottery-border;
+  }
+  .toggle-dot {
+    @apply inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-300;
+  }
+  .toggle-switch.active .toggle-dot {
+    @apply translate-x-6;
+  }
+  .toggle-switch:not(.active) .toggle-dot {
+    @apply translate-x-1;
+  }
+}
+
+@layer utilities {
+  .text-shadow-glow {
+    text-shadow: 0 0 20px rgba(236, 72, 153, 0.5), 0 0 40px rgba(236, 72, 153, 0.3);
+  }
+  .animation-delay-100 { animation-delay: 0.1s; }
+  .animation-delay-200 { animation-delay: 0.2s; }
+  .animation-delay-300 { animation-delay: 0.3s; }
+  .animation-delay-500 { animation-delay: 0.5s; }
+  .animation-delay-700 { animation-delay: 0.7s; }
+  .animation-delay-1000 { animation-delay: 1s; }
+}

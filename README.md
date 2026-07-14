@@ -1,0 +1,227 @@
+# Lottery Web - B站抽奖工具 Web 管理面板
+
+> **⚠️ 声明：本项目由 AI（Trae IDE）全程开发，未经过人工编写代码。代码质量和功能完整性请自行验证。**
+>
+> 本项目是对以下两个优秀开源项目的 **Web 管理界面封装**，核心功能完全依赖于原作者的工作：
+>
+> - **[LotteryAutoScript](https://github.com/shanmiteko/LotteryAutoScript)** by [@shanmiteko](https://github.com/shanmiteko) — B站动态抽奖自动化工具（GPL-3.0-or-later）
+> - **[BiliBiliToolPro](https://github.com/RayWangQvQ/BiliBiliToolPro)** by [@RayWangQvQ](https://github.com/RayWangQvQ) — BiliBili 自动任务工具（GPLv3）
+>
+> **衷心感谢以上原作者的开源贡献！** 本项目仅在他们的工作基础上提供了统一的 Web 管理面板，不包含任何核心业务逻辑的实现。
+>
+> 本项目遵循 **GNU General Public License v3.0** 开源协议，与上游项目保持一致。任何基于本项目的衍生作品必须同样以 GPLv3 协议开源，并保留原作者的版权声明。
+
+---
+
+## 项目简介
+
+Lottery Web 是一个基于 Docker 的 B站自动化工具 Web 管理面板，将 B站动态抽奖和 BiliBiliToolPro 两个工具整合到一个统一的 Web 界面中，方便用户通过浏览器进行配置和管理。
+
+## 功能特性
+
+### 🎰 抽奖自动化（基于 LotteryAutoScript）
+
+- 📋 **账户管理** - 添加、删除、查看抽奖账户
+- 📱 **扫码登录** - 通过二维码快速登录 B站账号
+- ⏰ **定时任务** - 配置看门狗定时执行抽奖任务
+- 📊 **状态监控** - 实时查看容器运行状态
+- 📜 **日志查看** - 实时查看运行日志
+- ⚙️ **配置编辑** - 在线编辑抽奖配置文件
+
+### 🛠️ BiliBiliToolPro 集成
+
+- 🚀 **容器管理** - 一键启动、停止、重启 BiliTool 容器
+- 📜 **日志查看** - 实时查看 BiliTool 运行日志
+- 🍪 **Cookie 配置** - 在线编辑 Cookie 信息
+- 🌐 **界面嵌入** - 通过 iframe 直接使用 BiliTool 完整 Web 界面
+- 👥 **多账号支持** - 支持配置多个 B站账号
+
+## 快速开始
+
+### 前置要求
+
+- Docker（版本 20.10+）
+- Docker Compose（版本 2.0+）
+- 能够访问 GitHub Container Registry（拉取 BiliTool 镜像）
+
+### 安装部署
+
+1. 克隆本仓库到本地，然后进入项目目录
+
+2. 复制配置模板
+
+```bash
+cp .env.example .env
+cp config/env.example.js config/env.js
+cp config/my_config.example.js config/my_config.js
+cp config/bili-tool/cookies.json.example config/bili-tool/cookies.json
+```
+
+3. 填写配置
+
+- 编辑 `config/env.js`，填入你的 B站 Cookie（详见 [Cookie 获取方法](https://github.com/shanmiteko/LotteryAutoScript#获取cookie)）
+- 编辑 `config/my_config.js`，根据需要配置抽奖参数（详见 [配置说明](https://github.com/shanmiteko/LotteryAutoScript#设置说明)）
+- 编辑 `.env`，根据需要调整端口和路径
+
+4. 启动服务
+
+```bash
+docker compose up -d
+```
+
+5. 访问 Web 界面
+
+打开浏览器访问 `http://localhost:9080`
+
+## 配置说明
+
+### 环境变量
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `PORT` | `9080` | Web 服务端口 |
+| `TZ` | `Asia/Shanghai` | 时区设置 |
+| `CONFIG_DIR` | `/data/config` | 容器内配置目录 |
+| `HOST_CONFIG_DIR` | `./config` | 宿主机配置目录（相对路径） |
+| `BILI_TOOL_CONTAINER` | `bili_tool_web` | BiliTool 容器名称 |
+| `BILI_TOOL_IMAGE` | `ghcr.io/raywangqvq/bili_tool_web` | BiliTool Docker 镜像 |
+| `BILI_TOOL_PORT` | `22331` | BiliTool Web 端口 |
+| `BILI_TOOL_CONFIG_DIR` | `/data/config/bili-tool` | 容器内 BiliTool 配置目录 |
+| `BILI_TOOL_HOST_CONFIG_DIR` | `./config/bili-tool` | 宿主机 BiliTool 配置目录 |
+
+### 配置目录结构
+
+```
+config/
+├── .watchdog.json          # 定时任务配置（自动生成）
+├── .schedule.json          # 调度配置（自动生成）
+├── env.js                  # 抽奖工具账号配置（必需）
+├── my_config.js            # 抽奖工具自定义配置（必需）
+└── bili-tool/
+    └── cookies.json        # BiliBiliToolPro Cookie 配置
+```
+
+### 端口说明
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| Web 管理面板 | 9080 | 本项目的 Web 界面 |
+| BiliTool Web | 22331 | BiliBiliToolPro 的 Web 界面 |
+
+> 💡 以上端口均可通过 `.env` 文件自定义修改。
+
+## 使用说明
+
+### 抽奖功能
+
+1. **配置账号**：编辑 `config/env.js`，填入 B站 Cookie
+2. **配置参数**：编辑 `config/my_config.js`，设置抽奖条件、关键词等
+3. **启动任务**：在 Web 界面的「仪表盘」页面配置定时任务并启动
+4. **查看状态**：在「账户」页面查看各账户运行状态和日志
+
+### BiliTool 功能
+
+1. **启动容器**：在「BiliTool」页面点击「启动」按钮
+2. **配置 Cookie**：在「配置」标签页编辑 Cookie 信息
+3. **使用界面**：在「BiliTool界面」标签页直接使用完整功能
+4. **查看日志**：在「日志」标签页查看运行日志
+
+## API 接口
+
+### 抽奖相关
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/status` | 获取所有容器状态 |
+| `POST` | `/api/container/:action/:name` | 容器操作（start/stop/remove） |
+| `GET` | `/api/logs/:name` | 获取容器日志 |
+| `GET` | `/api/logs/stream/:name` | 实时日志流（SSE） |
+| `GET` | `/api/config/:file` | 获取配置文件内容 |
+| `POST` | `/api/config/:file` | 保存配置文件 |
+| `GET` | `/api/qrcode` | 生成登录二维码 |
+| `GET` | `/api/qrcode/poll/:key` | 轮询二维码扫码状态 |
+| `POST` | `/api/sms/send` | 发送短信验证码 |
+| `POST` | `/api/sms/login` | 短信登录 |
+| `GET` | `/api/watchdog` | 获取看门狗配置 |
+| `POST` | `/api/watchdog` | 保存看门狗配置 |
+| `GET` | `/api/schedule` | 获取调度配置 |
+| `POST` | `/api/schedule` | 保存调度配置 |
+
+### BiliTool 相关
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/bili-tool/status` | 获取容器状态 |
+| `GET` | `/api/bili-tool/info` | 获取配置信息 |
+| `POST` | `/api/bili-tool/start` | 启动容器 |
+| `POST` | `/api/bili-tool/stop` | 停止容器 |
+| `POST` | `/api/bili-tool/restart` | 重启容器 |
+| `GET` | `/api/bili-tool/logs` | 获取容器日志 |
+| `GET` | `/api/bili-tool/config` | 获取配置 |
+| `POST` | `/api/bili-tool/config` | 保存配置 |
+
+## 技术栈
+
+- **前端**：React 18 + TypeScript + Vite + TailwindCSS
+- **后端**：Node.js + Express
+- **容器**：Docker + Docker Compose
+- **图标**：Lucide React
+
+## 常见问题
+
+### Q: 首次启动很慢？
+A: 首次启动需要拉取 Docker 镜像（包括 Node.js 构建镜像和 BiliTool 镜像），请耐心等待。
+
+### Q: BiliTool 容器启动失败？
+A: 请检查：
+1. Docker 是否正常运行
+2. 是否能够访问 `ghcr.io` 拉取镜像
+3. 端口 `22331` 是否被占用
+
+### Q: 抽奖工具不工作？
+A: 请检查：
+1. `config/env.js` 中的 Cookie 是否正确
+2. `config/my_config.js` 配置是否合理
+3. 容器日志中是否有错误信息
+
+### Q: 如何更新配置？
+A: 可以直接编辑 `config/` 目录下的配置文件，也可以通过 Web 界面在线编辑。修改后需要重启对应容器才能生效。
+
+## 注意事项
+
+- ⚠️ 本项目仅供学习和研究使用，请遵守 B站相关使用条款
+- ⚠️ 使用自动化工具可能存在账号风险，请谨慎使用
+- 💾 配置目录建议定期备份
+- 🔒 请勿将包含个人 Cookie 的配置文件上传到公开仓库
+
+## 致谢
+
+本项目站在巨人的肩膀上，核心功能完全依赖以下开源项目：
+
+| 项目 | 作者 | 协议 | 说明 |
+|------|------|------|------|
+| [LotteryAutoScript](https://github.com/shanmiteko/LotteryAutoScript) | [@shanmiteko](https://github.com/shanmiteko) | GPL-3.0-or-later | B站动态抽奖自动化工具 |
+| [BiliBiliToolPro](https://github.com/RayWangQvQ/BiliBiliToolPro) | [@RayWangQvQ](https://github.com/RayWangQvQ) | GPLv3 | BiliBili 自动任务工具 |
+
+感谢以上原作者的无私开源贡献！
+
+## License
+
+本项目基于 [GNU General Public License v3.0](./LICENSE) 开源协议，与上游项目保持一致。
+
+```
+Copyright (C) 2026 Lottery Web Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+```
