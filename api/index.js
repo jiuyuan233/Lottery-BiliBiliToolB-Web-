@@ -1193,18 +1193,36 @@ function initFeishuLongConnection() {
 initFeishuLongConnection();
 
 const containerMonitorState = {
-  check: { wasRunning: false, notified: false },
-  start: { wasRunning: false, notified: false },
-  clear: { wasRunning: false, notified: false },
+  check: { lastFinishedAt: '', lastStartedAt: '' },
+  start: { lastFinishedAt: '', lastStartedAt: '' },
+  clear: { lastFinishedAt: '', lastStartedAt: '' },
 };
 
-async function checkForWinInLogs(containerName) {
-  try {
-    const result = await execCmd(`docker logs ${containerName} 2>&1 | grep -iE "中奖|恭喜|中了|winner|winning|已中奖" | tail -5`);
-    return result.stdout && result.stdout.trim().length > 0;
-  } catch (e) {
-    return false;
+function checkForWinInLogs(logText) {
+  if (!logText) return false;
+  const winPatterns = [
+    /可能中奖了/,
+    /恭喜.*中奖/,
+    /中奖了/,
+    /已中奖/,
+    /获得奖励/,
+    /winner/i,
+    /winning/i,
+  ];
+  const excludePatterns = [
+    /暂未中奖/,
+    /中奖检测/,
+    /未中奖/,
+    /检查是否中奖/,
+    /永不中奖/,
+  ];
+  const lines = logText.split('\n');
+  for (const line of lines) {
+    const matchesWin = winPatterns.some(p => p.test(line));
+    const isExcluded = excludePatterns.some(p => p.test(line));
+    if (matchesWin && !isExcluded) return true;
   }
+  return false;
 }
 
 async function getTaskSummary(containerName) {
@@ -1220,75 +1238,89 @@ async function getTaskSummary(containerName) {
   }
 }
 
-async function runContainerMonitor() {
-  if (!FEISHU_APP_ID || !FEISHU_APP_SECRET || !FEISHU_OPEN_ID) return;
+async function handleContainerFinished(target, savedLogs) {
+  const containerName = CONTAINERS[target.key];
+  if (!containerName) return;
+  try {
+    const status = await getContainerStatus(containerName);
+    console.log(`[Monitor] ${target.label} 已结束 (exit=${status.exitCode})`);
 
-  const monitorTargets = [
-    { key: 'check', label: '检查任务', emoji: '🔍' },
-    { key: 'clear', label: '清理任务', emoji: '🧹' },
-  ];
+    const hasWon = checkForWinInLogs(savedLogs);
+    const summary = await getTaskSummary(containerName);
 
-  for (const target of monitorTargets) {
-    const containerName = CONTAINERS[target.key];
-    if (!containerName) continue;
-    try {
-      const status = await getContainerStatus(containerName);
-      const state = containerMonitorState[target.key];
-
-      if (status.running) {
-        if (!state.wasRunning) {
-          state.wasRunning = true;
-          state.notified = false;
-          console.log(`[Monitor] ${target.label} 开始运行`);
-        }
-      } else {
-        if (state.wasRunning && !state.notified) {
-          state.wasRunning = false;
-          state.notified = true;
-          console.log(`[Monitor] ${target.label} 已结束，检查结果...`);
-
-          const hasWon = await checkForWinInLogs(containerName);
-          const summary = await getTaskSummary(containerName);
-
-          let title, content;
-          if (hasWon) {
-            title = `${target.emoji} ${target.label}完成 - 🎉 恭喜中奖！`;
-            content = `${target.label}已运行完毕，检测到中奖信息！\n\n请查看详细日志确认中奖详情。`;
-          } else {
-            title = `${target.emoji} ${target.label}完成 - 未中奖`;
-            content = `${target.label}已运行完毕，本次未检测到中奖信息。\n继续加油，下次一定！💪`;
-          }
-
-          if (summary.total) {
-            content += `\n\n📊 处理数量：${summary.total}`;
-          }
-
-          const exitInfo = status.exitCode !== undefined ? `\n📝 退出码：${status.exitCode}` : '';
-          content += exitInfo;
-
-          try {
-            await sendFeishuMessage(title + '\n\n' + content);
-            console.log(`[Monitor] ${target.label}完成通知已发送`);
-          } catch (err) {
-            console.error('[Monitor] 发送通知失败:', err.message);
-          }
-        } else if (!status.exists) {
-          state.wasRunning = false;
-        }
-      }
-    } catch (e) {
-      console.error(`[Monitor] ${target.key} 监控异常:`, e.message);
+    let title, content;
+    if (hasWon) {
+      title = `${target.emoji} ${target.label}完成 - 🎉 恭喜中奖！`;
+      content = `${target.label}已运行完毕，检测到中奖信息！\n\n请查看详细日志确认中奖详情。`;
+    } else {
+      title = `${target.emoji} ${target.label}完成 - 未中奖`;
+      content = `${target.label}已运行完毕，本次未检测到中奖信息。\n继续加油，下次一定！💪`;
     }
+
+    if (summary.total) {
+      content += `\n\n📊 处理数量：${summary.total}`;
+    }
+
+    const exitInfo = status.exitCode !== undefined ? `\n📝 退出码：${status.exitCode}` : '';
+    content += exitInfo;
+
+    try {
+      await sendFeishuMessage(title + '\n\n' + content);
+      console.log(`[Monitor] ${target.label}完成通知已发送`);
+    } catch (err) {
+      console.error('[Monitor] 发送通知失败:', err.message);
+    }
+  } catch (e) {
+    console.error(`[Monitor] ${target.key} 处理完成事件异常:`, e.message);
   }
 }
 
-let containerMonitorTimer = null;
+const monitorTargetMap = {
+  [CONTAINERS.check]: { key: 'check', label: '检查任务', emoji: '🔍' },
+  [CONTAINERS.clear]: { key: 'clear', label: '清理任务', emoji: '🧹' },
+};
+
 function startContainerMonitor() {
-  if (containerMonitorTimer) clearInterval(containerMonitorTimer);
-  if (FEISHU_APP_ID && FEISHU_APP_SECRET && FEISHU_OPEN_ID) {
-    containerMonitorTimer = setInterval(runContainerMonitor, 15 * 1000);
-    console.log('[Monitor] 容器监控已启动（15秒间隔）');
+  if (!FEISHU_APP_ID || !FEISHU_APP_SECRET || !FEISHU_OPEN_ID) {
+    console.log('[Monitor] 飞书未配置，跳过容器监控');
+    return;
   }
+
+  const eventsProcess = spawn('docker', [
+    'events',
+    '--filter', 'event=die',
+    '--filter', 'event=destroy',
+    '--format', '{{.Actor.Attributes.name}}|{{.Action}}'
+  ]);
+
+  eventsProcess.stdout.on('data', (data) => {
+    const lines = data.toString().split('\n').filter(l => l.trim());
+    for (const line of lines) {
+      const [name, action] = line.split('|');
+      const target = monitorTargetMap[name];
+      if (!target) continue;
+      console.log(`[Monitor] 收到事件: ${name} ${action}`);
+      if (action === 'die') {
+        execCmd(`docker logs ${name} 2>&1`).then(result => {
+          const savedLogs = result.stdout || '';
+          handleContainerFinished(target, savedLogs);
+        }).catch(() => {
+          handleContainerFinished(target, '');
+        });
+      }
+    }
+  });
+
+  eventsProcess.stderr.on('data', (data) => {
+    console.error('[Monitor] docker events 错误:', data.toString());
+  });
+
+  eventsProcess.on('close', (code) => {
+    console.log(`[Monitor] docker events 进程退出 (code=${code})，5秒后重启...`);
+    setTimeout(startContainerMonitor, 5000);
+  });
+
+  console.log('[Monitor] 容器监控已启动（docker events 实时监听）');
 }
 
 startContainerMonitor();
