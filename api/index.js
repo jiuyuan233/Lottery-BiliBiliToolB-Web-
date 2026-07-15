@@ -1199,30 +1199,12 @@ const containerMonitorState = {
 };
 
 function checkForWinInLogs(logText) {
+  // 原项目 check.js 的 isMe() 函数已经自己判断好了：
+  //   中奖 → log.notice('可能中奖了', desp)  → 日志输出 [Notice] [帐号X 可能中奖了]
+  //   未中奖 → log.notice('中奖检测', '暂未中奖') → 日志输出 [Notice] [帐号X 中奖检测] [暂未中奖]
+  // 直接读取原项目的判断结果即可
   if (!logText) return false;
-  const winPatterns = [
-    /可能中奖了/,
-    /恭喜.*中奖/,
-    /中奖了/,
-    /已中奖/,
-    /获得奖励/,
-    /winner/i,
-    /winning/i,
-  ];
-  const excludePatterns = [
-    /暂未中奖/,
-    /中奖检测/,
-    /未中奖/,
-    /检查是否中奖/,
-    /永不中奖/,
-  ];
-  const lines = logText.split('\n');
-  for (const line of lines) {
-    const matchesWin = winPatterns.some(p => p.test(line));
-    const isExcluded = excludePatterns.some(p => p.test(line));
-    if (matchesWin && !isExcluded) return true;
-  }
-  return false;
+  return /\[Notice\].*?可能中奖了/.test(logText);
 }
 
 async function getTaskSummary(containerName) {
